@@ -7,7 +7,9 @@ import androidx.core.content.ContextCompat;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -38,11 +40,10 @@ import java.util.Date;
 
 public class MainActivity extends AppCompatActivity {
     private String TAG = "Radda eLearning";
-    private static String file_type = "*/*";
-    private String cam_file_data = null;
-    private ValueCallback<Uri> file_data;
-    private ValueCallback<Uri[]> file_path;
-    private final static int file_req_code = 1;
+    public ValueCallback<Uri[]> uploadMessage;
+    private ValueCallback<Uri> mUploadMessage;
+    public static final int REQUEST_SELECT_FILE = 100;
+    private final static int FILECHOOSER_RESULTCODE = 1;
     WebView myWebView;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
     private void showWebView()
     {
         if(isOnline()){
+            file_permission();
             myWebView = findViewById(R.id.ifView);
             WebSettings webSettings = myWebView.getSettings();
 
@@ -64,120 +66,15 @@ public class MainActivity extends AppCompatActivity {
             webSettings.setDomStorageEnabled(true);
             myWebView.setWebViewClient(new WebViewClient());
 
-            myWebView.loadUrl("https://raddaelearning.org/");
+            myWebView.loadUrl("https://raddaelearning.org/");//Your Expected URL
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 myWebView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             }
 
-            myWebView.setWebChromeClient(new WebChromeClient(){
 
-                public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+            myWebView.setWebChromeClient(new MyWebChromeClient());
 
-                    if(file_permission() && Build.VERSION.SDK_INT >= 21) {
-                        file_path = filePathCallback;
-                        Intent takePictureIntent = null;
-                        Intent takeVideoIntent = null;
-
-                        boolean includeVideo = false;
-                        boolean includePhoto = false;
-
-
-                        paramCheck:
-                        for (String acceptTypes : fileChooserParams.getAcceptTypes()) {
-                            String[] splitTypes = acceptTypes.split(", ?+");
-
-                            for (String acceptType : splitTypes) {
-                                switch (acceptType) {
-                                    case "*/*":
-                                        includePhoto = true;
-                                        includeVideo = true;
-                                        break paramCheck;
-                                    case "image/*":
-                                        includePhoto = true;
-                                        break;
-                                    case "video/*":
-                                        includeVideo = true;
-                                        break;
-                                }
-                            }
-                        }
-
-                        if (fileChooserParams.getAcceptTypes().length == 0) {
-
-
-                            includePhoto = true;
-                            includeVideo = true;
-                        }
-
-                        if (includePhoto) {
-                            takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                            if (takePictureIntent.resolveActivity(MainActivity.this.getPackageManager()) != null) {
-                                File photoFile = null;
-                                try {
-                                    photoFile = create_image();
-                                    takePictureIntent.putExtra("PhotoPath", cam_file_data);
-                                } catch (IOException ex) {
-                                    Log.e(TAG, "Image file creation failed", ex);
-                                }
-                                if (photoFile != null) {
-                                    cam_file_data = "file:" + photoFile.getAbsolutePath();
-                                    takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, Uri.fromFile(photoFile));
-                                } else {
-                                    cam_file_data = null;
-                                    takePictureIntent = null;
-                                }
-                            }
-                        }
-
-                        if (includeVideo) {
-                            takeVideoIntent = new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
-                            if (takeVideoIntent.resolveActivity(MainActivity.this.getPackageManager()) != null) {
-                                File videoFile = null;
-                                try {
-                                    videoFile = create_video();
-                                } catch (IOException ex) {
-                                    Log.e(TAG, "Video file creation failed", ex);
-                                }
-                                if (videoFile != null) {
-                                    cam_file_data = "file:" + videoFile.getAbsolutePath();
-                                    takeVideoIntent.putExtra(MediaStore.EXTRA_OUTPUT, Uri.fromFile(videoFile));
-                                } else {
-                                    cam_file_data = null;
-                                    takeVideoIntent = null;
-                                }
-                            }
-                        }
-
-                        Intent contentSelectionIntent = new Intent(Intent.ACTION_GET_CONTENT);
-                        contentSelectionIntent.addCategory(Intent.CATEGORY_OPENABLE);
-                        contentSelectionIntent.setType(file_type);
-
-
-                        Intent[] intentArray;
-                        if (takePictureIntent != null && takeVideoIntent != null) {
-                            intentArray = new Intent[]{takePictureIntent, takeVideoIntent};
-                        } else if (takePictureIntent != null) {
-                            intentArray = new Intent[]{takePictureIntent};
-                        } else if (takeVideoIntent != null) {
-                            intentArray = new Intent[]{takeVideoIntent};
-                        } else {
-                            intentArray = new Intent[0];
-                        }
-
-                        Intent chooserIntent = new Intent(Intent.ACTION_CHOOSER);
-                        chooserIntent.putExtra(Intent.EXTRA_INTENT, contentSelectionIntent);
-                        chooserIntent.putExtra(Intent.EXTRA_TITLE, "File chooser");
-                        chooserIntent.putExtra(Intent.EXTRA_INITIAL_INTENTS, intentArray);
-                        startActivityForResult(chooserIntent, file_req_code);
-                        return true;
-                    } else {
-                        return false;
-                    }
-                }
-
-
-            });
         }
         else{
             try{
@@ -221,64 +118,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent intent){
+    public void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
-        if(Build.VERSION.SDK_INT >= 21){
-            Uri[] results = null;
-
-            /*-- if file request cancelled; exited camera. we need to send null value to make future attempts workable --*/
-            if (resultCode == Activity.RESULT_CANCELED) {
-                file_path.onReceiveValue(null);
-                return;
-            }
-
-            /*-- continue if response is positive --*/
-            if(resultCode== Activity.RESULT_OK){
-                if(null == file_path){
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            if (requestCode == REQUEST_SELECT_FILE) {
+                if (uploadMessage == null)
                     return;
-                }
-                ClipData clipData;
-                String stringData;
-
-                try {
-                    clipData = intent.getClipData();
-                    stringData = intent.getDataString();
-                }catch (Exception e){
-                    clipData = null;
-                    stringData = null;
-                }
-                if (clipData == null && stringData == null && cam_file_data != null) {
-                    results = new Uri[]{Uri.parse(cam_file_data)};
-                }else{
-                    if (clipData != null) {
-                        final int numSelectedFiles = clipData.getItemCount();
-                        results = new Uri[numSelectedFiles];
-                        for (int i = 0; i < clipData.getItemCount(); i++) {
-                            results[i] = clipData.getItemAt(i).getUri();
-                        }
-                    } else {
-                        try {
-                            Bitmap cam_photo = (Bitmap) intent.getExtras().get("data");
-                            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                            cam_photo.compress(Bitmap.CompressFormat.JPEG, 100, bytes);
-                            stringData = MediaStore.Images.Media.insertImage(this.getContentResolver(), cam_photo, null, null);
-                        }catch (Exception ignored){}
-
-                        results = new Uri[]{Uri.parse(stringData)};
-                    }
-                }
+                uploadMessage.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, intent));
+                uploadMessage = null;
             }
-
-            file_path.onReceiveValue(results);
-            file_path = null;
-        }else{
-            if(requestCode == file_req_code){
-                if(null == file_data) return;
-                Uri result = intent == null || resultCode != RESULT_OK ? null : intent.getData();
-                file_data.onReceiveValue(result);
-                file_data = null;
-            }
-        }
+        } else if (requestCode == FILECHOOSER_RESULTCODE) {
+            if (null == mUploadMessage)
+                return;
+            Uri result = intent == null || resultCode != MainActivity.RESULT_OK ? null : intent.getData();
+            mUploadMessage.onReceiveValue(result);
+            mUploadMessage = null;
+        } else
+            Toast.makeText(MainActivity.this, "Failed to Upload Image", Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -296,18 +152,53 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private File create_image() throws IOException{
-        @SuppressLint("SimpleDateFormat") String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-        String imageFileName = "img_"+timeStamp+"_";
-        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
-        return File.createTempFile(imageFileName,".jpg",storageDir);
-    }
+    //Custom WEbChromeClient for File Upload//
+    class MyWebChromeClient extends WebChromeClient {
+        protected void openFileChooser(ValueCallback uploadMsg, String acceptType) {
+            mUploadMessage = uploadMsg;
+            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("image/*");
+            startActivityForResult(Intent.createChooser(i, "File Chooser"), FILECHOOSER_RESULTCODE);
+        }
 
-    private File create_video() throws IOException {
-        @SuppressLint("SimpleDateFormat")
-        String file_name    = new SimpleDateFormat("yyyy_mm_ss").format(new Date());
-        String new_name     = "file_"+file_name+"_";
-        File sd_directory   = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
-        return File.createTempFile(new_name, ".3gp", sd_directory);
+
+        // For Lollipop 5.0+ Devices
+        @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+        public boolean onShowFileChooser(WebView mWebView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+            if (uploadMessage != null) {
+                uploadMessage.onReceiveValue(null);
+                uploadMessage = null;
+            }
+
+            uploadMessage = filePathCallback;
+
+            Intent intent = fileChooserParams.createIntent();
+            try {
+                startActivityForResult(intent, REQUEST_SELECT_FILE);
+            } catch (ActivityNotFoundException e) {
+                uploadMessage = null;
+                Toast.makeText(MainActivity.this, "Cannot Open File Chooser", Toast.LENGTH_LONG).show();
+                return false;
+            }
+            return true;
+        }
+
+        //For Android 4.1 only
+        protected void openFileChooser(ValueCallback<Uri> uploadMsg, String acceptType, String capture) {
+            mUploadMessage = uploadMsg;
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("image/*");
+            startActivityForResult(Intent.createChooser(intent, "File Chooser"), FILECHOOSER_RESULTCODE);
+        }
+
+        protected void openFileChooser(ValueCallback<Uri> uploadMsg) {
+            mUploadMessage = uploadMsg;
+            Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("image/*");
+            startActivityForResult(Intent.createChooser(i, "File Chooser"), FILECHOOSER_RESULTCODE);
+        }
     }
 }
