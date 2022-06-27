@@ -1,122 +1,124 @@
 package com.example.webviewfileupload;
 
-import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-
-import android.Manifest;
-import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
-import android.app.Activity;
+import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
-import android.content.ClipData;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
-import android.graphics.Bitmap;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.provider.MediaStore;
 import android.util.Log;
+import android.webkit.DownloadListener;
+import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
-import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import androidx.appcompat.app.AlertDialog;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends AppCompatActivity {
+
     private String TAG = "Radda eLearning";
+    String websiteURL = "https://raddaelearning.org/"; // https://avant.adnarchive.com/
+    private WebView webview;
+    SwipeRefreshLayout mySwipeRefreshLayout;
     public ValueCallback<Uri[]> uploadMessage;
     private ValueCallback<Uri> mUploadMessage;
     public static final int REQUEST_SELECT_FILE = 100;
     private final static int FILECHOOSER_RESULTCODE = 1;
-    WebView myWebView;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        mySwipeRefreshLayout = findViewById(R.id.srl);
         showWebView();
     }
-    @SuppressLint("SetJavaScriptEnabled")
-    private void showWebView()
-    {
-        if(isOnline()){
-            file_permission();
-            myWebView = findViewById(R.id.ifView);
-            WebSettings webSettings = myWebView.getSettings();
 
-            webSettings.setJavaScriptEnabled(true);
-            webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
-            webSettings.setAppCacheEnabled(true);
-            webSettings.setDatabaseEnabled(true);
-            webSettings.setDomStorageEnabled(true);
-            myWebView.setWebViewClient(new WebViewClient());
+    private void showWebView(){
+        if( ! CheckNetwork.isInternetAvailable(this)) //returns true if internet available
+        {
+            //if there is no internet do this
+            setContentView(R.layout.activity_main);
+            //Toast.makeText(this,"No Internet Connection, Chris",Toast.LENGTH_LONG).show();
 
-            myWebView.loadUrl("https://raddaelearning.org/");//Your Expected URL
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                myWebView.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-            }
-
-
-            myWebView.setWebChromeClient(new MyWebChromeClient());
+            new AlertDialog.Builder(this) //alert the person knowing they are about to close
+                    .setTitle("No internet connection available")
+                    .setMessage("Please Check you're Mobile data or Wifi network.")
+                    .setPositiveButton("Ok", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            finish();
+                        }
+                    })
+                    //.setNegativeButton("No", null)
+                    .show();
 
         }
-        else{
-            try{
-                AlertDialog alertDialog = new AlertDialog.Builder(MainActivity.this).create();
-                alertDialog.setTitle(R.string.alert_title);
-                alertDialog.setMessage(getString(R.string.alert_message));
-                alertDialog.setButton(android.app.AlertDialog.BUTTON_NEUTRAL, "OK",
-                        new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface dialog, int which) {
-                                dialog.dismiss();
-                            }
-                        });
-                alertDialog.show();
-            }catch (Exception e){
-                Log.d(TAG, "Show Dialog: "+e.getMessage());
-            }
+        else
+        {
+            //Webview stuff
+            webview = findViewById(R.id.layout_web_view);
+            webview.getSettings().setJavaScriptEnabled(true);
+            webview.getSettings().setDomStorageEnabled(true);
+            webview.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+            webview.loadUrl(websiteURL);
+            webview.getSettings().setLoadWithOverviewMode(true);
+            webview.getSettings().setUseWideViewPort(true);
+            webview.getSettings().setAllowContentAccess(true);
+            webview.setWebViewClient(new WebViewClientDemo());
+
+            webview.setDownloadListener(new DownloadListener() {
+
+                @Override
+                public void onDownloadStart(String url, String userAgent,
+                                            String contentDisposition, String mimetype,
+                                            long contentLength) {
+                    DownloadManager.Request request = new DownloadManager.Request(
+                            Uri.parse(url));
+                    final String filename= URLUtil.guessFileName(url, contentDisposition, mimetype);
+                    request.allowScanningByMediaScanner();
+                    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED); //Notify client once download is completed!
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+                    DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                    dm.enqueue(request);
+                    Toast.makeText(getApplicationContext(), "Downloading File", //To notify the Client that the file is being downloaded
+                            Toast.LENGTH_LONG).show();
+                    Log.d(TAG, "onDownloadStart: "+ url);
+
+                }
+            });
+
+            // TODO: 3/1/2022
+            ///here i changed for you/////
+            webview.setWebChromeClient(new MyWebChromeClient());
+
         }
+
+        //Swipe to refresh functionality
+        mySwipeRefreshLayout.setOnRefreshListener(
+                new SwipeRefreshLayout.OnRefreshListener() {
+                    @Override
+                    public void onRefresh() {
+                        webview.reload();
+                    }
+                }
+        );
     }
 
-    public boolean isOnline() {
-        boolean result;
-        ConnectivityManager cm =   (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo netInfo = cm.getActiveNetworkInfo();
-        if (netInfo != null && netInfo.isConnectedOrConnecting()){
-            result=true;
-        }
-        else{
-            Toast.makeText(getBaseContext(), "Not Online",Toast.LENGTH_LONG).show();
-            result=false;
-        }
-        return result;
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (myWebView.isFocused() && myWebView.canGoBack()) {
-            myWebView.goBack();
-        } else {
-            super.onBackPressed();
-        }
-    }
-
+    // TODO: 3/1/2022
+    ///OnActivity for File Upload
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent intent) {
         super.onActivityResult(requestCode, resultCode, intent);
@@ -137,21 +139,7 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(MainActivity.this, "Failed to Upload Image", Toast.LENGTH_LONG).show();
     }
 
-    @Override
-    public void onConfigurationChanged(Configuration newConfig){
-        super.onConfigurationChanged(newConfig);
-    }
-
-    public boolean file_permission(){
-        if(Build.VERSION.SDK_INT >=23 && (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
-                || ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)) {
-            ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.CAMERA}, 1);
-            return false;
-        }else{
-            return true;
-        }
-    }
-
+    // TODO: 3/1/2022
     //Custom WEbChromeClient for File Upload//
     class MyWebChromeClient extends WebChromeClient {
         protected void openFileChooser(ValueCallback uploadMsg, String acceptType) {
@@ -201,4 +189,84 @@ public class MainActivity extends AppCompatActivity {
             startActivityForResult(Intent.createChooser(i, "File Chooser"), FILECHOOSER_RESULTCODE);
         }
     }
+
+
+    private class WebViewClientDemo extends WebViewClient {
+        @Override
+        //Keep webview in app when clicking links
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            if (url.startsWith("zoomus://")) {
+
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                startActivity(intent);
+                Log.d(TAG, "zooom URl: "+ url);
+
+            }else {
+                //Log.d(TAG, "shouldOverrideUrlLoading: "+ "general");
+                Log.d(TAG, "general URl: "+ url);
+                view.loadUrl(url);
+            }
+            return true;
+        }
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            super.onPageFinished(view, url);
+            mySwipeRefreshLayout.setRefreshing(false);
+        }
+    }
+
+    //set back button functionality
+    @Override
+    public void onBackPressed() { //if user presses the back button do this
+        if (webview.isFocused() && webview.canGoBack()) { //check if in webview and the user can go back
+            webview.goBack(); //go back in webview
+        } else { //do this if the webview cannot go back any further
+
+            new AlertDialog.Builder(this) //alert the person knowing they are about to close
+                    .setTitle("EXIT")
+                    .setMessage("Are you sure?")
+                    .setPositiveButton("Yes", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            finish();
+                        }
+                    })
+                    .setNegativeButton("No", null)
+                    .show();
+        }
+    }
+
+
+}
+
+class CheckNetwork {
+
+    private static final String TAG = CheckNetwork.class.getSimpleName();
+
+    public static boolean isInternetAvailable(Context context)
+    {
+        NetworkInfo info = (NetworkInfo) ((ConnectivityManager)
+                context.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetworkInfo();
+
+        if (info == null)
+        {
+            Log.d(TAG,"no internet connection");
+            return false;
+        }
+        else
+        {
+            if(info.isConnected())
+            {
+                Log.d(TAG," internet connection available...");
+                return true;
+            }
+            else
+            {
+                Log.d(TAG," internet connection");
+                return true;
+            }
+
+        }
+    }
+
 }
